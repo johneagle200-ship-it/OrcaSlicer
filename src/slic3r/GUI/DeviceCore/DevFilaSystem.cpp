@@ -752,6 +752,98 @@ void DevFilaSystemParser::ParseV1_0(const json& jj, MachineObject* obj, DevFilaS
                             {
                                 curr_tray->remain = -1;
                             }
+//---------------------------------------------------------------------------------------
+//-------------------------------------------------------------
+//  CUSTOM OPENSPOOL TAG SUPPORT (BRAND, TYPE, COLOR, TEMPS)
+//-------------------------------------------------------------
+
+// 1. BRAND — честно сохраняем бренд из метки, даже если Orca его не знает
+if (tray_it->contains("brand")) {
+    std::string brand = (*tray_it)["brand"].get<std::string>();
+    if (!brand.empty()) {
+        curr_tray->sub_brands = brand;   // НЕ заменяем на Generic
+    }
+}
+
+// 2. TYPE — тип пластика из метки OpenSpool
+if (tray_it->contains("type")) {
+    std::string type = (*tray_it)["type"].get<std::string>();
+    if (!type.empty()) {
+        curr_tray->m_fila_type = type;   // сохраняем как есть
+    }
+}
+
+// 3. SUBTYPE — можно сохранить в sub_brands как расширение бренда
+if (tray_it->contains("subtype")) {
+    std::string subtype = (*tray_it)["subtype"].get<std::string>();
+    if (!subtype.empty()) {
+        if (!curr_tray->sub_brands.empty())
+            curr_tray->sub_brands += " " + subtype;
+        else
+            curr_tray->sub_brands = subtype;
+    }
+}
+
+// 4. COLOR — color_hex + alpha → 8‑байтная строка, как ожидает Orca
+if (tray_it->contains("color_hex")) {
+    std::string hex = (*tray_it)["color_hex"].get<std::string>();
+    std::string alpha = "FF";
+    if (tray_it->contains("alpha"))
+        alpha = (*tray_it)["alpha"].get<std::string>();
+
+    std::string full_color = hex + alpha;   // RRGGBBAA
+    curr_tray->UpdateColorFromStr(full_color);
+}
+
+// 5. WEIGHT — прямое присваивание
+if (tray_it->contains("weight")) {
+    int w = (*tray_it)["weight"].get<int>();
+    curr_tray->weight = std::to_string(w);
+}
+
+// 6. TEMPERATURES — min/max из OpenSpool
+if (tray_it->contains("min_temp")) {
+    int tmin = (*tray_it)["min_temp"].get<int>();
+    curr_tray->nozzle_temp_min = std::to_string(tmin);
+}
+
+if (tray_it->contains("max_temp")) {
+    int tmax = (*tray_it)["max_temp"].get<int>();
+    curr_tray->nozzle_temp_max = std::to_string(tmax);
+}
+
+// Если tray_temp пустой — ставим min_temp как базовую температуру
+if (curr_tray->temp.empty() && tray_it->contains("min_temp")) {
+    curr_tray->temp = std::to_string((*tray_it)["min_temp"].get<int>());
+}
+
+//-------------------------------------------------------------
+//  GENERIC PROFILE MERGE (если бренд неизвестен)
+//-------------------------------------------------------------
+
+bool brand_known = DevUtilBackend::IsBrandKnown(curr_tray->sub_brands);
+
+if (!brand_known) {
+    // 1. загрузить generic профиль по типу пластика
+    auto generic = DevUtilBackend::GetGenericProfile(curr_tray->m_fila_type);
+
+    if (generic) {
+        // применяем generic значения, если они не перекрыты меткой
+        if (curr_tray->nozzle_temp_min.empty())
+            curr_tray->nozzle_temp_min = std::to_string(generic->min_temp);
+
+        if (curr_tray->nozzle_temp_max.empty())
+            curr_tray->nozzle_temp_max = std::to_string(generic->max_temp);
+
+        if (curr_tray->bed_temp.empty())
+            curr_tray->bed_temp = std::to_string(generic->bed_temp);
+
+        if (curr_tray->temp.empty())
+            curr_tray->temp = std::to_string(generic->print_temp);
+    }
+}
+//-------------------------------------------------------------------------------                            
+                            
                             if (tray_it->contains("tray_slot_placeholder")) {
                                 curr_tray->is_slot_placeholder = true;
                             }
